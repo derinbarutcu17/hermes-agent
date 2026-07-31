@@ -7,22 +7,28 @@ on:
 
 permissions:
   contents: read
-  issues: write
   pull-requests: read
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
     steps:
+      - name: Restore previous status
+        uses: actions/cache/restore@v4
+        with:
+          path: monitor-state
+          key: hermes-pr-monitor-state-${{ github.run_id }}
+          restore-keys: hermes-pr-monitor-state-
+
       - name: Check tracked PRs
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const fs = require('fs');
             const upstream = { owner: 'NousResearch', repo: 'hermes-agent' };
             const tracked = [59892, 73655, 73658, 73660];
-            const title = 'Hermes PR monitor';
-            const marker = '<!-- hermes-pr-monitor-state';
+            const statePath = 'monitor-state/state.json';
 
             async function getPullRequest(number) {
               const { data: pull } = await github.rest.pulls.get({
@@ -81,30 +87,9 @@ jobs:
             }
 
             const current = await Promise.all(tracked.map(getPullRequest));
-            const { owner, repo } = context.repo;
-            const issues = await github.paginate(github.rest.issues.listForRepo, {
-              owner,
-              repo,
-              state: 'open',
-              per_page: 100,
-            });
-            let issue = issues.find(item => !item.pull_request && item.title === title);
-            const stateBlock = `${marker}\n${JSON.stringify(current)}\n-->`;
-
-            if (!issue) {
-              const links = current.map(pr => `- [#${pr.number}](${pr.url})`).join('\n');
-              const created = await github.rest.issues.create({
-                owner,
-                repo,
-                title,
-                body: `This issue stores the latest status for the tracked Hermes PRs.\n\n${links}\n\n${stateBlock}`,
-              });
-              issue = created.data;
-              core.info(`Created tracker issue #${issue.number}`);
-            }
-
-            const oldMatch = (issue.body || '').match(/<!-- hermes-pr-monitor-state\n([\s\S]*?)\n-->/);
-            const previous = oldMatch ? JSON.parse(oldMatch[1]) : [];
+            const previous = fs.existsSync(statePath)
+              ? JSON.parse(fs.readFileSync(statePath, 'utf8'))
+              : [];
             const previousByNumber = new Map(previous.map(pr => [pr.number, pr]));
             const signature = pr => JSON.stringify({
               merge: [pr.state, pr.merged, pr.draft, pr.mergeable, pr.mergeableState, pr.headSha],
@@ -112,14 +97,8 @@ jobs:
               unresolved: pr.unresolved,
             });
             const changed = current.filter(pr => signature(pr) !== signature(previousByNumber.get(pr.number) || {}));
-
-            const intro = (issue.body || '').split(marker)[0].trim();
-            await github.rest.issues.update({
-              owner,
-              repo,
-              issue_number: issue.number,
-              body: `${intro}\n\n${stateBlock}`,
-            });
+            fs.mkdirSync('monitor-state', { recursive: true });
+            fs.writeFileSync(statePath, JSON.stringify(current));
 
             if (previous.length && changed.length) {
               const lines = changed.map(pr => {
@@ -131,10 +110,12 @@ jobs:
                   : 'no unresolved review threads';
                 return `- [#${pr.number}](${pr.url}): ${pr.state}, mergeable=${pr.mergeableState}, ${reviews}. CI: ${checks}`;
               });
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: issue.number,
-                body: `Hermes PR status changed:\n\n${lines.join('\n')}`,
-              });
+              core.setFailed(`Hermes PR status changed:\n\n${lines.join('\n')}`);
             }
+
+      - name: Save current status
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: monitor-state
+          key: hermes-pr-monitor-state-${{ github.run_id }}
