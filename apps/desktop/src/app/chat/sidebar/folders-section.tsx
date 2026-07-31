@@ -12,7 +12,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { SidebarGroup, SidebarGroupContent } from '@/components/ui/sidebar'
@@ -266,11 +266,7 @@ function FolderMemberList({
     .filter((s): s is SessionInfo => s !== undefined)
 
   if (memberSessions.length === 0) {
-    return (
-      <div className="ml-[1.125rem] py-1 pl-1 text-[0.6875rem] text-(--ui-text-tertiary)">
-        No sessions
-      </div>
-    )
+    return <div className="ml-[1.125rem] py-1 pl-1 text-[0.6875rem] text-(--ui-text-tertiary)">No sessions</div>
   }
 
   return (

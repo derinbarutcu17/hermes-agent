@@ -84,11 +84,7 @@ export async function moveToFolder(
   }
 }
 
-export async function removeFromFolder(
-  sessionId: string,
-  folderId: string,
-  profile?: string
-): Promise<boolean> {
+export async function removeFromFolder(sessionId: string, folderId: string, profile?: string): Promise<boolean> {
   try {
     await removeSessionsFromFolder(folderId, [sessionId], profile)
     await refreshFolders(profile)
