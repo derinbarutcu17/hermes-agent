@@ -59,9 +59,21 @@ def _mock_urlopen_failing(error: Exception | None = None) -> MagicMock:
 class TestDashboardCheck:
     def test_reachable(self):
         with patch.dict(os.environ, {"HERMES_DASHBOARD_SESSION_TOKEN": "secret"}), \
-             patch("urllib.request.urlopen", return_value=_mock_urlopen()):
+             patch("urllib.request.urlopen", return_value=_mock_urlopen()) as mock_urlopen:
             from tools.session_tools import _check_dashboard
             assert _check_dashboard() is True
+            request = mock_urlopen.call_args.args[0]
+            assert request.full_url.endswith("/api/sessions?limit=1")
+            assert request.get_header("X-hermes-session-token") == "secret"
+
+    def test_uses_loaded_dashboard_token_when_env_is_unavailable(self):
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.dict(sys.modules, {"hermes_cli.web_server": MagicMock(_SESSION_TOKEN="in-process-secret")}), \
+             patch("urllib.request.urlopen", return_value=_mock_urlopen()) as mock_urlopen:
+            from tools.session_tools import _check_dashboard
+            assert _check_dashboard() is True
+            request = mock_urlopen.call_args.args[0]
+            assert request.get_header("X-hermes-session-token") == "in-process-secret"
 
     def test_public_status_is_not_enough(self):
         with patch.dict(os.environ, {}, clear=True), \
