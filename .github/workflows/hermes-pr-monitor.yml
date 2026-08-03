@@ -72,7 +72,10 @@ jobs:
                 state: pull.state,
                 merged: pull.merged,
                 draft: pull.draft,
-                mergeable: pull.mergeable,
+                // REST reports mergeable=false for both conflicts and PRs
+                // blocked by required approval/check rules. Only `dirty` is
+                // an actual merge conflict worth alerting on.
+                conflict: pull.mergeable_state === 'dirty',
                 mergeableState: pull.mergeable_state,
                 headSha: pull.head.sha,
                 checks: checks.check_runs
@@ -91,12 +94,18 @@ jobs:
               ? JSON.parse(fs.readFileSync(statePath, 'utf8'))
               : [];
             const previousByNumber = new Map(previous.map(pr => [pr.number, pr]));
+            // Ignore the first run after upgrading the state shape. The old
+            // monitor stored raw `mergeable`, which caused a false alert when
+            // GitHub returned false for a policy-blocked but conflict-free PR.
+            const compatibleState = previous.length > 0 && previous.every(pr => typeof pr.conflict === 'boolean');
             const signature = pr => JSON.stringify({
-              merge: [pr.state, pr.merged, pr.draft, pr.mergeable, pr.mergeableState, pr.headSha],
+              merge: [pr.state, pr.merged, pr.draft, pr.conflict, pr.headSha],
               checks: pr.checks,
               unresolved: pr.unresolved,
             });
-            const changed = current.filter(pr => signature(pr) !== signature(previousByNumber.get(pr.number) || {}));
+            const changed = compatibleState
+              ? current.filter(pr => signature(pr) !== signature(previousByNumber.get(pr.number) || {}))
+              : [];
             fs.mkdirSync('monitor-state', { recursive: true });
             fs.writeFileSync(statePath, JSON.stringify(current));
 
@@ -108,7 +117,8 @@ jobs:
                 const reviews = pr.unresolved.length
                   ? `${pr.unresolved.length} unresolved review thread(s)`
                   : 'no unresolved review threads';
-                return `- [#${pr.number}](${pr.url}): ${pr.state}, mergeable=${pr.mergeableState}, ${reviews}. CI: ${checks}`;
+                const mergeStatus = pr.conflict ? 'merge conflict' : 'no merge conflict';
+                return `- [#${pr.number}](${pr.url}): ${pr.state}, ${mergeStatus}, ${reviews}. CI: ${checks}`;
               });
               core.setFailed(`Hermes PR status changed:\n\n${lines.join('\n')}`);
             }
