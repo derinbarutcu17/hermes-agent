@@ -21,7 +21,8 @@ import { useI18n } from '@/i18n'
 import { getSession, type SessionFolder, type SessionInfo } from '@/hermes'
 import { triggerHaptic } from '@/lib/haptics'
 import { $folders, $foldersLoading, createFolder, deleteAndRemoveFolder, refreshFolders } from '@/store/session-folders'
-import { $selectedStoredSessionId, $sessions, $workingSessionIds, sessionPinId } from '@/store/session'
+import { $selectedStoredSessionId, $sessions, sessionPinId } from '@/store/session'
+import { $workingSessionIds } from '@/store/session-states'
 
 import { SidebarPanelLabel } from '../../shell/sidebar-label'
 import { SidebarSessionRow } from './session-row'
@@ -246,7 +247,7 @@ function FolderMemberList({
     void Promise.all(
       missingIds.map(id =>
         getSession(id, profile)
-          .then(session => ({ ...session, profile: session.profile ?? profile }))
+          .then(session => session)
           .catch(() => null)
       )
     ).then(results => {
