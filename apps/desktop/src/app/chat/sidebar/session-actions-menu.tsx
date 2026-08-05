@@ -7,6 +7,7 @@ import {
   closeAllTreeTabs,
   closeOtherTreeTabs,
   closeTreeTabsToRight,
+  reloadTreePane,
   treeTabCloseTargets
 } from '@/components/pane-shell/tree/store'
 import {
@@ -37,6 +38,11 @@ import {
   sessionPinId,
   setSessions
 } from '@/store/session'
+import {
+  $folders,
+  moveToFolder as storeMoveToFolder,
+  removeFromFolder as storeRemoveFromFolder
+} from '@/store/session-folders'
 import { $sessionColorOverrides, setSessionColorOverride } from '@/store/session-color'
 import { $sessionTiles } from '@/store/session-states'
 import { canOpenSessionWindow } from '@/store/windows'
@@ -97,6 +103,7 @@ interface SessionActions {
   onBranch?: () => void
   onArchive?: () => void
   onDelete?: () => void
+  currentFolderId?: string | null
   /** Close this surface (a tile tab) — omitted where nothing closes (sidebar
    *  rows, the main tab). */
   onClose?: () => void
@@ -137,6 +144,7 @@ function useSessionActions({
   title,
   pinned = false,
   profile,
+  currentFolderId,
   onPin,
   onBranch,
   onArchive,
@@ -149,6 +157,7 @@ function useSessionActions({
   const { t } = useI18n()
   const r = t.sidebar.row
   const [renameOpen, setRenameOpen] = useState(false)
+  const foldersList = useStore($folders)
   const tiles = useStore($sessionTiles)
   const selectedStoredSessionId = useStore($selectedStoredSessionId)
 
@@ -239,12 +248,24 @@ function useSessionActions({
     })
   ]
 
-  // TAB — close verbs that act on the strip (tabs only; a row isn't a tab).
+  // TAB — verbs that act on the strip (tabs only; a row isn't a tab).
   const closeTargets = surface === 'tab' && tabPaneId ? treeTabCloseTargets(tabPaneId) : null
 
-  const tabCloseItems: ActionItemSpec[] =
+  const tabItems: ActionItemSpec[] =
     surface === 'tab'
       ? [
+          ...(tabPaneId
+            ? [
+                spec({
+                  icon: 'refresh',
+                  label: t.zones.reload,
+                  onSelect: () => {
+                    triggerHaptic('selection')
+                    reloadTreePane(tabPaneId)
+                  }
+                })
+              ]
+            : []),
           ...(onClose
             ? [
                 spec({
@@ -342,10 +363,44 @@ function useSessionActions({
       />
       <kit.Separator />
       {workItems.map(item => renderActionItem(kit, item))}
-      {tabCloseItems.length > 0 && (
+      {currentFolderId &&
+        renderActionItem(kit, {
+          icon: 'close',
+          label: r.removeFromFolder ?? 'Remove from folder',
+          onSelect: () => {
+            triggerHaptic('selection')
+            void storeRemoveFromFolder(sessionId, currentFolderId, profile)
+          }
+        })}
+      {foldersList.length > 0 && (
+        <kit.Sub>
+          <kit.SubTrigger>
+            <Codicon name="folder" size="0.875rem" />
+            <span>{r.moveToFolder ?? 'Move to folder'}</span>
+          </kit.SubTrigger>
+          <kit.SubContent>
+            {foldersList.map(folder =>
+              renderActionItem(kit, {
+                key: folder.id,
+                label: (
+                  <>
+                    <span>{folder.name}</span>
+                    {folder.id === currentFolderId && <span className="ml-auto text-(--ui-text-tertiary)">✓</span>}
+                  </>
+                ),
+                onSelect: () => {
+                  triggerHaptic('selection')
+                  void storeMoveToFolder(sessionId, folder.id, currentFolderId, profile)
+                }
+              })
+            )}
+          </kit.SubContent>
+        </kit.Sub>
+      )}
+      {tabItems.length > 0 && (
         <>
           <kit.Separator />
-          {tabCloseItems.map(item => renderActionItem(kit, item))}
+          {tabItems.map(item => renderActionItem(kit, item))}
         </>
       )}
       <kit.Separator />

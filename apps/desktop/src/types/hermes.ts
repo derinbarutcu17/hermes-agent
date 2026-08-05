@@ -339,6 +339,7 @@ export interface HermesConfig {
   }
   terminal?: {
     cwd?: string
+    font_family?: string
   }
   stt?: {
     enabled?: boolean
@@ -515,6 +516,15 @@ export interface SessionInfo {
   is_default_profile?: boolean
 }
 
+export interface SessionFolder {
+  id: string
+  name: string
+  sort_order: number
+  created_at: number
+  session_count: number
+  session_ids: string[]
+}
+
 export type TimelineDisplayMetadata =
   | { model: string; provider?: string }
   | {
@@ -599,6 +609,7 @@ export interface SessionResumeResponse {
   info?: SessionRuntimeInfo
   message_count: number
   messages: SessionMessage[]
+  messages_omitted?: boolean
   resumed: string
   running?: boolean
   session_id: string
