@@ -30,7 +30,6 @@ import { PROFILE_SWATCHES } from '@/lib/profile-color'
 import { exportSession } from '@/lib/session-export'
 import { activeGateway } from '@/store/gateway'
 import { notify, notifyError } from '@/store/notifications'
-import { $projectTree, moveSessionToProject, projectIdForCwd, projectRootCwd } from '@/store/projects'
 import {
   $activeSessionId,
   $selectedStoredSessionId,
@@ -39,6 +38,11 @@ import {
   sessionPinId,
   setSessions
 } from '@/store/session'
+import {
+  $folders,
+  moveToFolder as storeMoveToFolder,
+  removeFromFolder as storeRemoveFromFolder
+} from '@/store/session-folders'
 import { $sessionColorOverrides, setSessionColorOverride } from '@/store/session-color'
 import { $sessionTiles } from '@/store/session-states'
 import { canOpenSessionWindow } from '@/store/windows'
@@ -99,6 +103,7 @@ interface SessionActions {
   onBranch?: () => void
   onArchive?: () => void
   onDelete?: () => void
+  currentFolderId?: string | null
   /** Close this surface (a tile tab) — omitted where nothing closes (sidebar
    *  rows, the main tab). */
   onClose?: () => void
@@ -134,49 +139,12 @@ function SessionColorSwatches({ sessionId }: { sessionId: string }) {
   )
 }
 
-// The project list inside the session menu's "Move to project" submenu. Its own
-// component so only an OPEN submenu subscribes to the stores (same reasoning as
-// SessionColorSwatches). Re-homes the session's workspace at the target
-// project's root — the fix for a chat created in the wrong folder. The current
-// owner and folderless projects (the Home bucket) are excluded: there is
-// nothing to move into.
-function MoveToProjectItems({ kit, sessionId, profile }: { kit: MenuKit; sessionId: string; profile?: string }) {
-  const { t } = useI18n()
-  const p = t.sidebar.projects
-  const tree = useStore($projectTree)
-  const session = useStore($sessions).find(s => sessionMatchesStoredId(s, sessionId))
-  const cwd = session?.cwd?.trim() || ''
-  const currentProjectId = cwd ? projectIdForCwd(cwd) : null
-  const targets = tree.filter(node => node.id !== currentProjectId && !node.isNoProject && projectRootCwd(node))
-
-  if (targets.length === 0) {
-    return <kit.Item disabled>{p.moveNoProjects}</kit.Item>
-  }
-
-  return (
-    <>
-      {targets.map(node => (
-        <kit.Item
-          key={node.id}
-          onSelect={() => {
-            triggerHaptic('selection')
-            moveSessionToProject(sessionId, node.id, profile)
-              .then(() => notify({ durationMs: 2_000, kind: 'success', message: p.movedTo(node.label) }))
-              .catch(err => notifyError(err, p.moveFailed))
-          }}
-        >
-          {node.label}
-        </kit.Item>
-      ))}
-    </>
-  )
-}
-
 function useSessionActions({
   sessionId,
   title,
   pinned = false,
   profile,
+  currentFolderId,
   onPin,
   onBranch,
   onArchive,
@@ -189,6 +157,7 @@ function useSessionActions({
   const { t } = useI18n()
   const r = t.sidebar.row
   const [renameOpen, setRenameOpen] = useState(false)
+  const foldersList = useStore($folders)
   const tiles = useStore($sessionTiles)
   const selectedStoredSessionId = useStore($selectedStoredSessionId)
 
@@ -394,15 +363,40 @@ function useSessionActions({
       />
       <kit.Separator />
       {workItems.map(item => renderActionItem(kit, item))}
-      <kit.Sub>
-        <kit.SubTrigger disabled={!sessionId}>
-          <Codicon name="folder" size="0.875rem" />
-          <span>{t.sidebar.projects.moveToProject}</span>
-        </kit.SubTrigger>
-        <kit.SubContent>
-          <MoveToProjectItems kit={kit} profile={profile} sessionId={sessionId} />
-        </kit.SubContent>
-      </kit.Sub>
+      {currentFolderId &&
+        renderActionItem(kit, {
+          icon: 'close',
+          label: r.removeFromFolder ?? 'Remove from folder',
+          onSelect: () => {
+            triggerHaptic('selection')
+            void storeRemoveFromFolder(sessionId, currentFolderId, profile)
+          }
+        })}
+      {foldersList.length > 0 && (
+        <kit.Sub>
+          <kit.SubTrigger>
+            <Codicon name="folder" size="0.875rem" />
+            <span>{r.moveToFolder ?? 'Move to folder'}</span>
+          </kit.SubTrigger>
+          <kit.SubContent>
+            {foldersList.map(folder =>
+              renderActionItem(kit, {
+                key: folder.id,
+                label: (
+                  <>
+                    <span>{folder.name}</span>
+                    {folder.id === currentFolderId && <span className="ml-auto text-(--ui-text-tertiary)">✓</span>}
+                  </>
+                ),
+                onSelect: () => {
+                  triggerHaptic('selection')
+                  void storeMoveToFolder(sessionId, folder.id, currentFolderId, profile)
+                }
+              })
+            )}
+          </kit.SubContent>
+        </kit.Sub>
+      )}
       {tabItems.length > 0 && (
         <>
           <kit.Separator />

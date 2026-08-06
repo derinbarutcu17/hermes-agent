@@ -1,6 +1,5 @@
 import { JsonRpcGatewayClient } from '@hermes/shared'
 
-import { reconnectBackoffDelayMs } from '@/lib/reconnect-backoff'
 import type {
   ActionResponse,
   ActionStatusResponse,
@@ -47,7 +46,6 @@ import type {
   PairingResponse,
   PairingUser,
   ProfileCreatePayload,
-  ProfileDesktopOverlay,
   ProfileSetupCommand,
   ProfileSoul,
   ProfilesResponse,
@@ -187,7 +185,6 @@ export type {
   PairingResponse,
   PairingUser,
   ProfileCreatePayload,
-  ProfileDesktopOverlay,
   ProfileInfo,
   ProfileSetupCommand,
   ProfileSoul,
@@ -352,12 +349,8 @@ export function pluginSocket(pluginId: string, path: string, onMessage: (data: u
       socket = null
 
       if (!disposed) {
-        // Full-jitter exponential backoff: same rationale as the gateway
-        // socket reconnect loops — an immediate-retry loop across many
-        // desktop clients floods the gateway with connection attempts
-        // during a restart.
-        window.setTimeout(() => void connect(), reconnectBackoffDelayMs(attempt, { baseDelayMs: 500, capMs: 30_000 }))
         attempt += 1
+        window.setTimeout(() => void connect(), Math.min(30_000, 1_000 * 2 ** attempt))
       }
     }
   }
@@ -1433,36 +1426,6 @@ export function getProfileSetupCommand(name: string): Promise<ProfileSetupComman
   })
 }
 
-/** Export a profile to a shareable .tar.gz on the backend's filesystem.
- *  `extraFiles` stages extra root-level files (desktop.json — the appearance/
- *  interface overlay) into the archive alongside the profile's own artifacts. */
-export function exportProfileArchive(
-  name: string,
-  opts: { extraFiles?: Record<string, string>; output?: string } = {}
-): Promise<{ archive: string; ok: boolean }> {
-  return window.hermesDesktop.api<{ archive: string; ok: boolean }>({
-    path: `/api/profiles/${encodeURIComponent(name)}/export`,
-    method: 'POST',
-    body: { extra_files: opts.extraFiles ?? {}, output: opts.output ?? '' },
-    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS
-  })
-}
-
-/** Import a profile .tar.gz as a new profile. Returns the bundled desktop
- *  appearance overlay too (when the archive carried one) so the caller can
- *  apply theme/layout without another round-trip. */
-export function importProfileArchive(
-  archive: string,
-  name?: string
-): Promise<{ desktop: null | ProfileDesktopOverlay; name: string; ok: boolean; path: string }> {
-  return window.hermesDesktop.api<{ desktop: null | ProfileDesktopOverlay; name: string; ok: boolean; path: string }>({
-    path: '/api/profiles/import',
-    method: 'POST',
-    body: { archive, name: name || null },
-    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS
-  })
-}
-
 export function getUsageAnalytics(days = 30): Promise<AnalyticsResponse> {
   return window.hermesDesktop.api<AnalyticsResponse>({
     ...profileScoped(),
@@ -1816,5 +1779,86 @@ export function runDebugShare(): Promise<DebugShareResponse> {
     body: {},
     // Synchronous upload of report + logs to the paste service.
     timeoutMs: 120_000
+  })
+}
+
+// ── Session Folders ─────────────────────────────────────────────────
+
+export interface SessionFolder {
+  id: string
+  name: string
+  sort_order: number
+  created_at: number
+  session_count: number
+  session_ids: string[]
+}
+
+export function listSessionFolders(profile?: string): Promise<SessionFolder[]> {
+  const params = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  return window.hermesDesktop.api<SessionFolder[]>({
+    ...(profile ? { profile } : {}),
+    path: `/api/session-folders${params}`
+  })
+}
+
+export function createSessionFolder(name: string, profile?: string): Promise<SessionFolder> {
+  return window.hermesDesktop.api<SessionFolder>({
+    ...(profile ? { profile } : {}),
+    path: '/api/session-folders',
+    method: 'POST',
+    body: { name, ...(profile ? { profile } : {}) }
+  })
+}
+
+export function updateSessionFolder(folderId: string, name: string, profile?: string): Promise<{ ok: boolean }> {
+  return window.hermesDesktop.api<{ ok: boolean }>({
+    ...(profile ? { profile } : {}),
+    path: `/api/session-folders/${encodeURIComponent(folderId)}`,
+    method: 'PATCH',
+    body: { name, ...(profile ? { profile } : {}) }
+  })
+}
+
+export function deleteSessionFolder(folderId: string, profile?: string): Promise<{ ok: boolean }> {
+  const params = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  return window.hermesDesktop.api<{ ok: boolean }>({
+    ...(profile ? { profile } : {}),
+    path: `/api/session-folders/${encodeURIComponent(folderId)}${params}`,
+    method: 'DELETE'
+  })
+}
+
+export function addSessionsToFolder(
+  folderId: string,
+  sessionIds: string[],
+  profile?: string
+): Promise<{ ok: boolean; count: number }> {
+  return window.hermesDesktop.api<{ ok: boolean; count: number }>({
+    ...(profile ? { profile } : {}),
+    path: `/api/session-folders/${encodeURIComponent(folderId)}/sessions`,
+    method: 'POST',
+    body: { session_ids: sessionIds, ...(profile ? { profile } : {}) }
+  })
+}
+
+export function removeSessionsFromFolder(
+  folderId: string,
+  sessionIds: string[],
+  profile?: string
+): Promise<{ ok: boolean; count: number }> {
+  return window.hermesDesktop.api<{ ok: boolean; count: number }>({
+    ...(profile ? { profile } : {}),
+    path: `/api/session-folders/${encodeURIComponent(folderId)}/sessions`,
+    method: 'DELETE',
+    body: { session_ids: sessionIds, ...(profile ? { profile } : {}) }
+  })
+}
+
+export function getSessionFolderMap(sessionIds: string[], profile?: string): Promise<Record<string, string[]>> {
+  const ids = sessionIds.join(',')
+  const params = `?session_ids=${encodeURIComponent(ids)}${profile ? `&profile=${encodeURIComponent(profile)}` : ''}`
+  return window.hermesDesktop.api<Record<string, string[]>>({
+    ...(profile ? { profile } : {}),
+    path: `/api/session-folders/map${params}`
   })
 }

@@ -37,7 +37,7 @@ _HERMES_CORE_TOOLS = [
     # read-only terminal tab, open a URL/file in the preview pane, focus a
     # pane, and react to a message with an emoji (all gated on HERMES_DESKTOP
     # via check_fn — hidden outside the GUI).
-    "read_terminal", "close_terminal", "open_preview", "read_preview", "focus_pane", "react_to_message",
+    "read_terminal", "close_terminal", "open_preview", "focus_pane", "react_to_message",
     # File manipulation
     "read_file", "write_file", "patch", "search_files",
     # Vision + image generation
@@ -83,6 +83,10 @@ _HERMES_CORE_TOOLS = [
     "kanban_attach", "kanban_attach_url", "kanban_attachments",
     # Computer use (macOS, gated on cua-driver being installed via check_fn)
     "computer_use",
+    # Session management (gated on dashboard API being reachable via check_fn)
+    "session_list", "session_archive", "session_rename", "session_delete",
+    "session_folder_list", "session_folder_create", "session_folder_add",
+    "session_folder_rename", "session_folder_delete",
 ]
 
 # Webhook events may originate from untrusted third-party content (for example,
@@ -193,6 +197,16 @@ TOOLSETS = {
     "skills": {
         "description": "Access, create, edit, and manage skill documents with specialized instructions and knowledge",
         "tools": ["skills_list", "skill_view", "skill_manage"],
+        "includes": []
+    },
+
+    "session_management": {
+        "description": "Manage Hermes sessions — list, archive, rename, delete, and organize into folders. Requires the Hermes dashboard to be running (service-gated via check_fn).",
+        "tools": [
+            "session_list", "session_archive", "session_rename", "session_delete",
+            "session_folder_list", "session_folder_create", "session_folder_add",
+            "session_folder_rename", "session_folder_delete",
+        ],
         "includes": []
     },
     
@@ -376,7 +390,6 @@ TOOLSETS = {
         "tools": [
             "web_search", "web_extract",
             "terminal", "process", "read_terminal", "close_terminal",
-            "open_preview", "read_preview",
             "read_file", "write_file", "patch", "search_files",
             "vision_analyze",
             "skills_list", "skill_view", "skill_manage",

@@ -862,7 +862,6 @@ const MEDIA_MIME_TYPES = {
   '.mp4': 'video/mp4',
   '.ogg': 'audio/ogg',
   '.opus': 'audio/ogg; codecs=opus',
-  '.pdf': 'application/pdf',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.wav': 'audio/wav',
@@ -871,7 +870,6 @@ const MEDIA_MIME_TYPES = {
 }
 
 const PREVIEW_HTML_EXTENSIONS = new Set(['.html', '.htm'])
-const PREVIEW_PDF_EXTENSIONS = new Set(['.pdf'])
 const PREVIEW_WATCH_DEBOUNCE_MS = 120
 const LOCAL_PREVIEW_HOSTS = new Set(['0.0.0.0', '127.0.0.1', '::1', '[::1]', 'localhost'])
 const TEXT_PREVIEW_MAX_BYTES = 512 * 1024
@@ -4906,8 +4904,7 @@ async function previewFileTarget(rawTarget, baseDir) {
   const metadata = previewFileMetadata(resolved, mimeType)
   const isHtml = PREVIEW_HTML_EXTENSIONS.has(ext)
   const isImage = mimeType.startsWith('image/')
-  const isPdf = PREVIEW_PDF_EXTENSIONS.has(ext) || mimeType === 'application/pdf'
-  const previewKind = isHtml ? 'html' : isImage ? 'image' : isPdf ? 'pdf' : metadata.binary ? 'binary' : 'text'
+  const previewKind = isHtml ? 'html' : isImage ? 'image' : metadata.binary ? 'binary' : 'text'
 
   return {
     binary: metadata.binary,
@@ -10020,6 +10017,7 @@ ipcMain.handle('hermes:requestMicrophoneAccess', async () => {
 //   GET    /api/sessions/{id}[/messages] → read from remote
 //   DELETE /api/sessions/{id}            → delete on remote
 //   PATCH  /api/sessions/{id}            → rename/archive on remote
+//   *      /api/session-folders[/*]       → folder operations on remote
 async function interceptSessionRequestForRemote(request) {
   if (typeof request?.path !== 'string') {
     return undefined
@@ -10036,6 +10034,43 @@ async function interceptSessionRequestForRemote(request) {
   }
 
   const { pathname, searchParams } = parsed
+
+  // Folder wrappers keep profile in the REST path/body for local and global
+  // backends, but a per-profile remote backend is already scoped to that
+  // profile. Strip the duplicate scope before forwarding or the remote host
+  // will try to open a second local profile named after the desktop profile.
+  const isFolderRequest =
+    pathname === '/api/session-folders' ||
+    pathname === '/api/session-folders/map' ||
+    /^\/api\/session-folders\/[^/]+(?:\/sessions)?$/.test(pathname)
+  if (isFolderRequest) {
+    const profile = (request.profile || searchParams.get('profile') || '').trim()
+    if (!profile || !profileHasRemoteOverride(profile)) {
+      if (!profile || !globalRemoteActive()) {
+        return undefined
+      }
+
+      const path = pathWithGlobalRemoteProfile(request.path, profile, {
+        globalRemote: true,
+        profileRemoteOverride: false
+      })
+
+      if (method === 'GET') {
+        return fetchJsonForProfile(null, path)
+      }
+
+      const body = request.body && typeof request.body === 'object' ? { ...request.body, profile } : { profile }
+      return requestJsonForProfile(null, path, method, body)
+    }
+    if (method === 'GET') {
+      const sessionIds = searchParams.get('session_ids')
+      const path = sessionIds === null ? pathname : `${pathname}?session_ids=${encodeURIComponent(sessionIds)}`
+      return fetchJsonForProfile(profile, path)
+    }
+    const body = request.body && typeof request.body === 'object' ? { ...request.body } : request.body
+    if (body) delete body.profile
+    return requestJsonForProfile(profile, pathname, method, body)
+  }
 
   if (method === 'GET' && pathname === '/api/profiles/sessions') {
     const remoteProfiles = configuredRemoteProfileNames()
@@ -10336,7 +10371,7 @@ ipcMain.handle('hermes:notify', (_event, payload) => {
   // kind+session can arrive here twice. Collapse it at this single choke point.
   // Return true (not false): a notification for the event IS being shown by the
   // first caller, so the settings "send test" success probe stays honest.
-  if (isDuplicateNotification(`${payload?.kind ?? ''}:${payload?.sessionId ?? payload?.tag ?? ''}`)) {
+  if (isDuplicateNotification(`${payload?.kind ?? ''}:${payload?.sessionId ?? ''}`)) {
     return true
   }
 
@@ -10511,22 +10546,6 @@ ipcMain.handle('hermes:writeClipboard', (_event, text) => {
   clipboard.writeText(String(text || ''))
 
   return true
-})
-
-// Native save-location picker (profile export etc.) — the write itself happens
-// elsewhere (the backend, for profile archives); this only picks the path.
-ipcMain.handle('hermes:selectSavePath', async (_event, options: any = {}) => {
-  const result = await dialog.showSaveDialog(mainWindow, {
-    title: options?.title || 'Save',
-    defaultPath: options?.defaultPath ? String(options.defaultPath) : undefined,
-    filters: Array.isArray(options?.filters) ? options.filters : undefined
-  })
-
-  if (result.canceled || !result.filePath) {
-    return null
-  }
-
-  return result.filePath
 })
 
 // Paired reader for the GUI terminal's paste chord: the renderer's
